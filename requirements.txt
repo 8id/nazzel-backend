@@ -62,7 +62,6 @@ python-dateutil==2.8.2
 python-engineio==4.11.2
 python-socketio==5.12.1
 pytz==2023.3.post1
-pywin32==306
 referencing==0.32.0
 reportlab==4.2.0
 requests==2.31.0
