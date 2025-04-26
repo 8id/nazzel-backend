@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl" id="htmlTag">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="title">Nazzel - تحميل الفيديوهات والصوتيات من يوتيوب وإنستغرام</title>
+    <meta name="description" content="مع Nazzel، حمّل فيديوهاتك وصوتياتك المفضلة بسهولة وسرعة من يوتيوب، إنستغرام، تيك توك، وفيسبوك بجودة عالية.">
+    <meta name="keywords" content="Nazzel, تحميل فيديو, تنزيل صوت, يوتيوب, إنستغرام, تيك توك, فيسبوك, تحميل فيديوهات, تنزيل mp3, قص فيديو">
+    <meta name="author" content="المهندس حسان ضعيف">
+    <meta name="robots" content="index, follow">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:title" content="Nazzel - تحميل الفيديوهات والصوتيات بسهولة">
+    <meta property="og:description" content="مع Nazzel، تنزيل فيديوهات وصوتيات بجودة عالية من يوتيوب، إنستغرام، تيك توك، وفيسبوك مع ميزات المعاينة وقص الفيديو.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://nazzel.com">
+    <meta property="og:image" content="/static/thumbnail.jpg">
+    <meta property="og:site_name" content="Nazzel">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Nazzel - تحميل الفيديوهات والصوتيات">
+    <meta name="twitter:description" content="حمّل فيديوهاتك المفضلة بسهولة مع Nazzel من منصات متعددة مع خيارات متقدمة.">
+    <meta name="twitter:image" content="/static/thumbnail.jpg">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon.png') }}">
+
+    <!-- Preload Critical CSS -->
+    <link rel="preload" href="{{ url_for('static', filename='style.css') }}" as="style" onload="this.rel='stylesheet'">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Nazzel",
+        "description": "تطبيق ويب لتحميل الفيديوهات والصوتيات من يوتيوب، إنستغرام، تيك توك، وفيسبوك بجودة عالية مع خيارات المعاينة وقص الفيديو.",
+        "url": "https://nazzel.com",
+        "applicationCategory": "Multimedia",
+        "operatingSystem": "All",
+        "creator": {
+            "@type": "Person",
+            "name": "المهندس حسان ضعيف"
+        },
+        "inLanguage": [
+            "ar",
+            "en",
+            "tr"
+        ],
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        }
+    }
+    </script>
+</head>
+<body>
+    <header class="top-bar">
+        <button id="languageButton" title="تغيير اللغة" aria-label="تغيير اللغة"><i class="fas fa-globe"></i></button>
+        <button class="theme-toggle" id="themeToggle" title="تغيير الوضع" aria-label="تغيير الوضع"><i class="fas fa-sun"></i></button>
+    </header>
+
+    <main class="container main-container fade-in">
+        <h1 data-i18n="heading">Nazzel - تحميل الفيديوهات والصوتيات بسهولة</h1>
+        <p class="description" data-i18n="description">مع Nazzel، حمّل فيديوهاتك وصوتياتك المفضلة من يوتيوب، إنستغرام، تيك توك، وفيسبوك بجودة عالية!</p>
+        <form id="previewForm" role="form" aria-label="نموذج تحميل الفيديو">
+            <div class="input-container">
+                <input type="text" id="videoUrl" name="url" placeholder="أدخل الرابط هنا" required data-i18n="placeholder.url" aria-label="رابط الفيديو">
+                <button type="button" id="pasteButton" aria-label="لصق الرابط"><i class="fas fa-paste"></i> <span data-i18n="paste">لصق</span></button>
+            </div>
+            <div class="options action-buttons">
+                <button type="button" id="autoButton" data-mode="auto" aria-label="تحميل تلقائي"><i class="fas fa-star"></i> <span data-i18n="auto">تلقائي</span></button>
+                <button type="button" id="audioButton" data-mode="audio" aria-label="تحميل صوت فقط"><i class="fas fa-music"></i> <span data-i18n="audio">صوت فقط</span></button>
+                <button type="button" id="trimButton" data-mode="trim" aria-label="قص جزء من الفيديو أو الصوت"><i class="fas fa-cut"></i> <span data-i18n="trim">جزء من الفيديو/الصوت</span></button>
+                <button type="submit" id="previewButton" disabled aria-label="معاينة الفيديو"><i class="fas fa-eye"></i> <span data-i18n="preview">معاينة</span></button>
+            </div>
+            <input type="hidden" name="mode" id="selectedMode">
+        </form>
+
+        <div id="loading" style="display: none;" class="loading-indicator" aria-live="polite">
+            <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+            <p data-i18n="loading.preview">جاري المعاينة، يرجى التحلي بالصبر...</p>
+        </div>
+
+        <section id="preview" style="display: none;" class="preview-section" aria-live="polite">
+            <div class="preview-content">
+                <div class="preview-thumbnail">
+                    <img id="thumbnail" src="" alt="صورة مصغرة للفيديو" loading="lazy">
+                </div>
+                <div class="preview-details">
+                    <h2 id="videoTitle" aria-label="عنوان الفيديو"></h2>
+                    <p><i class="fas fa-clock" aria-hidden="true"></i> <span data-i18n="duration">المدة</span>: <span id="duration"></span> <span>دقيقة</span></p>
+                    <div id="trimTypeSelection" style="display: none;" class="options trim-type-options">
+                        <button type="button" id="trimVideoButton" data-trim-type="video" aria-label="قص فيديو"><i class="fas fa-video"></i> <span data-i18n="trim.video">فيديو</span></button>
+                        <button type="button" id="trimAudioButton" data-trim-type="audio" aria-label="قص صوت"><i class="fas fa-music"></i> <span data-i18n="trim.audio">صوت</span></button>
+                    </div>
+                </div>
+            </div>
+
+            <form id="downloadForm" class="download-area" role="form" aria-label="نموذج تنزيل الفيديو">
+                <input type="hidden" name="url" id="downloadUrl">
+                <input type="hidden" name="quality" id="selectedQuality">
+                <input type="hidden" name="audio_only" id="audioOnly" value="false">
+                <input type="hidden" name="mode" id="downloadMode">
+                <input type="hidden" name="trim_type" id="trimType" value="">
+
+                <div class="quality-selection-container">
+                    <label data-i18n="quality.select" class="section-label">اختر الجودة:</label>
+                    <div id="qualityOptions" class="quality-options" role="radiogroup" aria-label="خيارات الجودة"></div>
+                </div>
+
+                <div class="trim-container" id="trimContainer" style="display: none;">
+                    <label class="section-label">تحديد الجزء:</label>
+                    <div class="trim-inputs">
+                        <div>
+                            <label for="startTime" data-i18n="trim.start">وقت البداية (MM:SS):</label>
+                            <input type="text" name="start_time" id="startTime" value="00:00" placeholder="MM:SS" aria-label="وقت بداية القص">
+                        </div>
+                        <div>
+                            <label for="endTime" data-i18n="trim.end">وقت النهاية (MM:SS):</label>
+                            <input type="text" name="end_time" id="endTime" placeholder="MM:SS" aria-label="وقت نهاية القص">
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" id="downloadButton" disabled aria-label="تحميل الفيديو أو الصوت"><i class="fas fa-download"></i> <span data-i18n="download">تحميل</span></button>
+            </form>
+        </section>
+
+        <div class="overlay" id="overlay" aria-hidden="true"></div>
+        <div id="successPopup" class="popup success-popup" role="alert" aria-live="assertive">
+            <div class="icon"><i class="fas fa-check-circle" aria-hidden="true"></i></div>
+            <p id="successMessage"></p>
+            <button onclick="closePopup()" data-i18n="ok">موافق</button>
+        </div>
+
+        <div id="errorPopup" class="popup error-popup" role="alert" aria-live="assertive">
+            <div class="icon"><i class="fas fa-exclamation-triangle" aria-hidden="true"></i></div>
+            <p id="errorMessage"></p>
+            <button onclick="closeErrorPopup()" data-i18n="ok">موافق</button>
+        </div>
+
+        <!-- Legal Notice Modal -->
+        <div id="legalNoticeModal" class="legal-notice-modal" role="dialog" aria-labelledby="legalNoticeTitle" aria-modal="true">
+            <div class="legal-notice-content">
+                <h2 id="legalNoticeTitle" data-i18n="legal_notice_title">إشعار قانوني</h2>
+                <p data-i18n="legal_notice">يرجى استخدام Nazzel وفقًا لشروط المنصات. نحن غير مسؤولين عن الاستخدام غير القانوني. ويرجى استخدام الموقع بما يرضي الله.</p>
+                <button onclick="closeLegalNotice()" data-i18n="ok">موافق</button>
+            </div>
+        </div>
+    </main>
+
+    <footer class="copyright fade-in">
+        <p data-i18n="copyright">© 2025 جميع الحقوق محفوظة للمهندس حسان ضعيف</p>
+        <nav class="footer-links" aria-label="روابط إضافية">
+            <a href="#" onclick="showLegalNotice()" data-i18n="footer_legal_notice">عرض الإشعار القانوني</a>
+        </nav>
+        <nav class="social-icons" aria-label="روابط وسائل التواصل الاجتماعي">
+            <a href="https://www.facebook.com/ii0kk" target="_blank" title="Facebook" aria-label="حساب فيسبوك"><i class="fab fa-facebook-f"></i></a>
+            <a href="https://www.instagram.com/p.o2k/" target="_blank" title="Instagram" aria-label="حساب إنستغرام"><i class="fab fa-instagram"></i></a>
+            <a href="https://www.linkedin.com/in/8id/" target="_blank" title="LinkedIn" aria-label="حساب لينكدإن"><i class="fab fa-linkedin-in"></i></a>
+            <a href="https://github.com/8id" target="_blank" title="GitHub" aria-label="حساب جيت هب"><i class="fab fa-github"></i></a>
+        </nav>
+    </footer>
+
+    <div class="loading-message" id="loadingMessage" style="display: none;" aria-live="polite">
+        <div class="loading-content">
+            <i class="fas fa-hourglass-half fa-spin" aria-hidden="true"></i>
+            <span data-i18n="loading.download">جاري التحميل، يرجى التحلي بالصبر... ولا تنسى الاستغفار</span>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='legal_notice.js') }}" defer></script>
+    <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'935950252fda4531',t:'MTc0NTUzNjYzNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading' !==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script>
+</body>
+</html>
