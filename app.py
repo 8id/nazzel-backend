@@ -1,5 +1,5 @@
 from flask import Flask, request, render_template, jsonify, send_from_directory
-from flask_cors import CORS # <-- الخطوة 2: استيراد CORS
+from flask_cors import CORS
 import yt_dlp as youtube_dl
 import os
 import logging
@@ -10,11 +10,10 @@ import string
 import subprocess
 
 # Configure logging
-# زيادة مستوى التسجيل لرؤية معلومات أكثر فائدة عند الحاجة
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-CORS(app) # <-- الخطوة 2: تفعيل CORS لجميع المصادر
+CORS(app)
 
 # Configuration
 UPLOAD_FOLDER = 'downloads'
@@ -23,6 +22,10 @@ AUDIO_FOLDER = os.path.join(UPLOAD_FOLDER, 'audio')
 ALLOWED_PLATFORMS = ['youtube.com', 'youtu.be', 'instagram.com', 'tiktok.com', 'facebook.com']
 SECRET_KEY = secrets.token_hex(16)
 app.config['SECRET_KEY'] = SECRET_KEY
+# --- الخطوة 1: تحديد مسار ملف الكوكيز ---
+# هذا هو المسار الافتراضي للملفات السرية في Render
+INSTAGRAM_COOKIE_PATH = "/etc/secrets/instagram_cookies.txt"
+# -----------------------------------------
 
 # Create directories if they don't exist
 os.makedirs(VIDEO_FOLDER, exist_ok=True)
@@ -45,155 +48,167 @@ def is_valid_url(url):
 def generate_safe_filename(title):
     """Generates a safe filename from the video title."""
     safe_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-    # استبدال المسافات بـ '_' قد يكون أفضل لتجنب مشاكل في بعض الأنظمة
     filename = ''.join(c for c in title if c in safe_chars).replace(' ', '_')
-    # إزالة النقاط المتعددة المتتالية
     filename = "_".join(filter(None, filename.split('.')))
-    # تقصير اسم الملف إذا كان طويلاً جداً (اختياري)
     max_len = 100
     if len(filename) > max_len:
         filename = filename[:max_len]
-    return filename.strip('._ ') # إزالة أي رموز غير مرغوبة من البداية والنهاية
+    return filename.strip('._ ')
 
 @app.route('/')
 def home():
-    # هذا المسار قد لا يتم استخدامه إذا كانت الواجهة الأمامية على Netlify
-    # لكن من الجيد إبقاؤه للاختبار المحلي
     logging.info("Serving home page template.")
     return render_template('index.html')
 
 @app.route('/preview', methods=['POST'])
 def preview():
-    url = request.form.get('url') # استخدام .get لتجنب KeyError إذا لم يتم إرسال الحقل
-    mode = request.form.get('mode', 'video') # وضع افتراضي 'video'
+    url = request.form.get('url')
+    mode = request.form.get('mode', 'video')
     logging.info(f"Received /preview request for URL: {url}, Mode: {mode}")
-
 
     if not url:
          logging.warning("Preview request received without URL.")
-         return jsonify({'error': 'الرجاء إدخال رابط!'}), 400 # Bad Request
+         return jsonify({'error': 'الرجاء إدخال رابط!'}), 400
 
     if not is_valid_url(url):
         logging.warning(f"Preview request with invalid/unsupported URL: {url}")
         return jsonify({'error': 'الرابط غير صالح أو غير مدعوم!'}), 400
 
     try:
-        # استخدام الخيارات التي تسرع العملية وتجنب المشاكل
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
-            'simulate': True, # simulate is deprecated, use skip_download
-            'extract_flat': 'in_playlist', # أسرع لاستخراج المعلومات الأولية
-            'forcejson': True, # الحصول على المخرجات كـ JSON مباشرة
-            'noplaylist': True, # منع معالجة قوائم التشغيل
-            'ignoreerrors': True, # محاولة الاستمرار حتى لو كان هناك خطأ بسيط
-            'socket_timeout': 10, # مهلة للاتصال
+            'simulate': True, # Deprecated, use skip_download
+            'extract_flat': 'in_playlist',
+            'forcejson': True,
+            'noplaylist': True,
+            'ignoreerrors': True,
+            'socket_timeout': 15, # زيادة المهلة قليلاً
         }
 
-        # لا حاجة لتحديد format هنا لأننا نريد فقط المعلومات الأولية
-        # سنحصل على الصيغ لاحقًا إذا لزم الأمر
+        # --- الخطوة 2: إضافة خيار الكوكيز لـ Instagram في المعاينة (المعلومات الأولية) ---
+        is_instagram = 'instagram.com' in url
+        cookie_file_exists = os.path.exists(INSTAGRAM_COOKIE_PATH)
 
-        logging.info(f"Extracting info for {url} with options: {ydl_opts}")
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            try:
+        if is_instagram:
+            if cookie_file_exists:
+                logging.info(f"Instagram URL detected. Using cookies from: {INSTAGRAM_COOKIE_PATH}")
+                ydl_opts['cookiefile'] = INSTAGRAM_COOKIE_PATH
+            else:
+                logging.warning(f"Instagram URL detected but cookie file not found at {INSTAGRAM_COOKIE_PATH}. Preview might fail.")
+                # لا نرجع خطأ هنا، قد تنجح بعض الطلبات بدون كوكيز
+        # --------------------------------------------------------------------
+
+        logging.info(f"Extracting initial info for {url} with options: {ydl_opts}")
+        info = None
+        try:
+            with youtube_dl.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                if not info: # Check if info is None or empty
+                if not info:
                      raise youtube_dl.utils.DownloadError("Failed to extract information, info is empty.")
 
-            except youtube_dl.utils.DownloadError as e:
-                logging.error(f"yt-dlp info extraction failed for {url}: {e}")
-                # محاولة تقديم رسالة خطأ أكثر تحديدًا للمستخدم
-                error_msg = 'فشل استخراج معلومات الفيديو. قد يكون الفيديو غير متاح، خاص، أو يتطلب تسجيل الدخول.'
-                if 'private' in str(e).lower():
-                    error_msg = 'الفيديو خاص ولا يمكن الوصول إليه.'
-                elif 'unavailable' in str(e).lower():
-                    error_msg = 'الفيديو غير متوفر في منطقتك أو تم حذفه.'
-                elif 'login required' in str(e).lower():
-                    error_msg = 'هذا المحتوى يتطلب تسجيل الدخول ولا يمكن تحميله حاليًا.'
-                return jsonify({'error': error_msg}), 404 # Not Found or Forbidden
-            except Exception as e:
-                logging.error(f"Unexpected error during info extraction for {url}: {e}", exc_info=True) # Log traceback
-                return jsonify({'error': 'حدث خطأ غير متوقع أثناء استخراج المعلومات.'}), 500
+        except youtube_dl.utils.DownloadError as e:
+            logging.error(f"yt-dlp info extraction failed for {url}: {e}")
+            error_msg = 'فشل استخراج معلومات الفيديو. قد يكون الفيديو غير متاح، خاص، يتطلب تسجيل الدخول أو تم الوصول لحد الطلبات.'
+            if 'private' in str(e).lower(): error_msg = 'الفيديو خاص ولا يمكن الوصول إليه.'
+            elif 'unavailable' in str(e).lower(): error_msg = 'الفيديو غير متوفر.'
+            elif 'login required' in str(e).lower(): error_msg = 'هذا المحتوى يتطلب تسجيل الدخول (قد تحتاج لتحديث الكوكيز).'
+            elif 'rate limit' in str(e).lower(): error_msg = 'تم الوصول لحد الطلبات المسموح به لهذه المنصة. حاول لاحقاً.'
+            return jsonify({'error': error_msg}), 400 # Use 400 or appropriate code
+        except Exception as e:
+            logging.error(f"Unexpected error during initial info extraction for {url}: {e}", exc_info=True)
+            return jsonify({'error': 'حدث خطأ غير متوقع أثناء استخراج المعلومات.'}), 500
 
-
-        # الآن لدينا المعلومات الأساسية، لنستخرج الصيغ المطلوبة
         title = info.get('title', 'غير متوفر')
-        duration = info.get('duration') # قد يكون None
-        thumbnail = info.get('thumbnail') or info.get('thumbnails', [{}])[0].get('url') # محاولة الحصول على الصورة المصغرة
+        duration = info.get('duration')
+        thumbnail = info.get('thumbnail') or info.get('thumbnails', [{}])[0].get('url')
 
-
-        # إعادة استخراج الصيغ بشكل منفصل إذا لزم الأمر (قد لا يكون ضرورياً مع forcejson)
-        # هذا الجزء قد يحتاج لمراجعة بناءً على مخرجات forcejson
+        # الحصول على الصيغ (قد يتطلب كوكيز لإنستغرام أيضًا)
         ydl_opts_formats = {
              'quiet': True,
              'no_warnings': True,
-             'listformats': True, # طلب قائمة الصيغ
+             # 'listformats': True, # listformats يطبع فقط, لا يعيد بيانات
              'noplaylist': True,
              'ignoreerrors': True,
-             'socket_timeout': 10,
+             'socket_timeout': 15,
         }
+        # --- إضافة خيار الكوكيز لـ Instagram (للحصول على الصيغ) ---
+        if is_instagram:
+            if cookie_file_exists:
+                logging.info(f"Using Instagram cookies for format extraction.")
+                ydl_opts_formats['cookiefile'] = INSTAGRAM_COOKIE_PATH
+            else:
+                logging.warning(f"Cookie file not found for Instagram format extraction.")
+        # ------------------------------------------------------
+
         logging.info(f"Extracting formats for {url}...")
-        formats_info_str = None
+        formats = []
         try:
              with youtube_dl.YoutubeDL(ydl_opts_formats) as ydl_formats:
-                  # yt-dlp مع listformats يطبع إلى stdout, نحتاج لالتقاطه أو استخدام API مختلف
-                  # الأسهل غالبًا هو استخراج المعلومات مرة أخرى بدون skip_download / extract_flat
-                  info_with_formats = youtube_dl.YoutubeDL({'quiet': True, 'no_warnings': True, 'noplaylist': True, 'ignoreerrors': True}).extract_info(url, download=False)
-                  if not info_with_formats:
-                       raise youtube_dl.utils.DownloadError("Failed to extract formats.")
-                  formats = info_with_formats.get('formats', [])
+                  info_with_formats = ydl_formats.extract_info(url, download=False)
+                  if info_with_formats:
+                       formats = info_with_formats.get('formats', [])
+                  else:
+                      logging.warning(f"Second info extraction returned empty for {url}.")
 
-        except Exception as e:
+        except youtube_dl.utils.DownloadError as e:
+             # قد يفشل هنا بسبب الحاجة لكوكيز ولم تكن موجودة
              logging.error(f"Failed to get formats for {url}: {e}")
-             formats = [] # متابعة بدون صيغ إذا فشل الاستخراج الثاني
-
+             if is_instagram and not cookie_file_exists:
+                  pass # متوقع إذا لم تكن الكوكيز موجودة
+             elif 'login required' in str(e).lower() or 'rate limit' in str(e).lower():
+                 pass # متوقع لإنستغرام
+             else:
+                # خطأ غير متوقع في استخراج الصيغ
+                return jsonify({'error': 'فشل في الحصول على جودات الفيديو المتاحة.'}), 500
+        except Exception as e:
+             logging.error(f"Unexpected error during format extraction for {url}: {e}", exc_info=True)
+             # متابعة بدون صيغ إذا فشل الاستخراج الثاني
 
         if mode == 'audio':
-             # في وضع الصوت، نعرض خيارًا واحدًا فقط
              logging.info(f"Preview mode 'audio' for {url}. Sending audio-only option.")
              return jsonify({
-                'title': title,
-                'duration': duration or 0,
-                'thumbnail': thumbnail or '',
-                'qualities': [('bestaudio/best', 'صوت فقط')], # رمز الجودة وقيمتها
-                'mode': mode # إعادة الوضع المطلوب
+                'title': title, 'duration': duration or 0, 'thumbnail': thumbnail or '',
+                'qualities': [('bestaudio/best', 'صوت فقط')], 'mode': mode
              })
 
-        # فلترة وتجميع جودات الفيديو
         unique_qualities = {}
-        for f in formats:
-            # التأكد من وجود فيديو وصوت (أو فيديو فقط إذا كان المستخدم سيختار الصوت لاحقًا)
-            # وله ارتفاع (height)
-             if f.get('vcodec') != 'none' and f.get('height'):
+        # --- تحسين منطق استخراج الجودات ---
+        if formats: # فقط إذا نجحنا في الحصول على الصيغ
+            for f in formats:
                  height = f.get('height')
                  format_id = f.get('format_id')
-                 # نعطي الأولوية للصيغ التي تحتوي على فيديو وصوت مدمجين (mp4 غالبًا)
-                 # أو نأخذ أعلى جودة لكل ارتفاع
-                 # هذا المنطق قد يحتاج لتحسين بناءً على المنصة
-                 is_merged_format = f.get('acodec') != 'none' and f.get('ext') == 'mp4'
+                 # نهتم فقط بالفيديو الذي له ارتفاع وصيغة ID
+                 if f.get('vcodec') != 'none' and height and format_id:
+                     # نعطي الأولوية لصيغ mp4 التي تحتوي على صوت وفيديو
+                     is_preferred = f.get('acodec') != 'none' and f.get('ext') == 'mp4'
+                     # إذا لم يكن هذا الارتفاع موجودًا، أو الصيغة الحالية مفضلة أكثر، أو لها معدل بت أعلى
+                     current_best_tbr = unique_qualities.get(height, {}).get('tbr', -1)
+                     current_is_preferred = unique_qualities.get(height, {}).get('preferred', False)
+                     new_tbr = f.get('tbr') or f.get('vbr') or f.get('abr') or 0 # محاولة الحصول على أي معدل بت
 
-                 # إذا لم يكن لدينا هذا الارتفاع أو الصيغة الحالية أفضل (مدمجة أو أعلى bitrate)
-                 if height not in unique_qualities or is_merged_format or f.get('tbr', 0) > unique_qualities.get(height, {}).get('tbr', 0):
-                       unique_qualities[height] = {'id': format_id, 'label': str(height), 'tbr': f.get('tbr',0)} # tbr = total bitrate (approx)
+                     # تحديث إذا: (جديد) أو (هذا مفضل والسابق ليس مفضل) أو (كلاهما نفس التفضيل وهذا له معدل بت أعلى)
+                     if height not in unique_qualities or \
+                        (is_preferred and not current_is_preferred) or \
+                        (is_preferred == current_is_preferred and new_tbr > current_best_tbr):
+                           unique_qualities[height] = {'id': format_id, 'label': str(height), 'tbr': new_tbr, 'preferred': is_preferred}
+        else:
+             logging.warning(f"No formats found for {url}. Cannot provide quality options.")
+             # يمكنك إرجاع خطأ هنا أو قائمة جودات فارغة
+             # return jsonify({'error': 'لم يتم العثور على جودات متاحة لهذا الرابط.'}), 404
 
-        # تحويل القاموس إلى قائمة مرتبة حسب الارتفاع (الأعلى أولاً)
-        # qualities_list = sorted(unique_qualities.values(), key=lambda item: int(item['label']), reverse=True)
-        # Format required by frontend: list of tuples [ (id, label), ... ]
+        # ---------------------------------
+
         qualities_tuples = sorted(
              [(q['id'], q['label']) for q in unique_qualities.values()],
-             key=lambda item: int(item[1]), # Sort by height (label)
-             reverse=True # Highest quality first
+             key=lambda item: int(item[1]), reverse=True
         )
-
 
         logging.info(f"Preview mode 'video' for {url}. Found qualities: {qualities_tuples}")
         return jsonify({
-            'title': title,
-            'duration': duration or 0,
-            'thumbnail': thumbnail or '',
-            'qualities': qualities_tuples, # إرسال قائمة الجودات المفلترة
-            'mode': mode
+            'title': title, 'duration': duration or 0, 'thumbnail': thumbnail or '',
+            'qualities': qualities_tuples, 'mode': mode
         })
 
     except Exception as e:
@@ -205,13 +220,11 @@ def preview():
 def download():
     url = request.form.get('url')
     quality = request.form.get('quality')
-    # التحقق من قيمة audio_only القادمة من الواجهة
     audio_only_str = request.form.get('audio_only', 'false').lower()
     audio_only = audio_only_str == 'true'
-
-    mode = request.form.get('mode') # 'trim', 'auto', 'audio'
-    start_time = request.form.get('start_time', '0') # قيمة بالثواني
-    end_time = request.form.get('end_time') # قيمة بالثواني أو None
+    mode = request.form.get('mode')
+    start_time = request.form.get('start_time', '0')
+    end_time = request.form.get('end_time')
 
     logging.info(f"Received /download request for URL: {url}, Quality: {quality}, AudioOnly: {audio_only}, Mode: {mode}, Start: {start_time}, End: {end_time}")
 
@@ -223,105 +236,104 @@ def download():
         logging.warning(f"Download request with invalid/unsupported URL: {url}")
         return jsonify({'error': 'الرابط غير صالح أو غير مدعوم!'}), 400
 
-    # التحقق من وجود ffmpeg (مهم جدًا)
     ffmpeg_path = shutil.which('ffmpeg')
     if not ffmpeg_path:
         logging.error("FFmpeg not found in PATH!")
-        # هذا الخطأ يجب ألا يحدث على Render إذا تم إعداد Dockerfile بشكل صحيح
         return jsonify({'error': 'خطأ في إعدادات الخادم: FFmpeg غير موجود.'}), 500
 
-    # تحديد مجلد الإخراج بناءً على audio_only
     output_dir = AUDIO_FOLDER if audio_only else VIDEO_FOLDER
     logging.info(f"Output directory set to: {output_dir}")
-
-    # اسم ملف مؤقت أولي (yt-dlp سيضيف الامتداد الصحيح)
-    # استخدام اسم آمن ونظيف
     temp_filename_pattern = os.path.join(output_dir, f"download_{secrets.token_hex(8)}.%(ext)s")
 
     try:
         ydl_opts = {
-            'outtmpl': temp_filename_pattern, # قالب لاسم الملف المؤقت
+            'outtmpl': temp_filename_pattern,
             'ffmpeg_location': ffmpeg_path,
             'quiet': True,
             'no_warnings': True,
             'encoding': 'utf-8',
             'noplaylist': True,
-            'noprogress': True, # منع طباعة شريط التقدم
-            'postprocessor_args': { # تحسينات لـ ffmpeg
-                 'ffmpeg': ['-v', 'error'] # تقليل مخرجات ffmpeg في السجل
-            } if not audio_only else { # خيارات خاصة بالصوت
-                 'ffmpeg': ['-v', 'error']
-            },
-            # تحديد الصيغة النهائية بعناية
-            'format': None, # سيتم تحديده أدناه
+            'noprogress': True,
+            'postprocessor_args': {'ffmpeg': ['-v', 'error']},
+            'format': None,
+            'socket_timeout': 30, # زيادة المهلة للتحميل
+            'retries': 3, # محاولة إعادة التحميل عند الفشل
         }
+
+        # --- الخطوة 3: إضافة خيار الكوكيز لـ Instagram في التحميل ---
+        is_instagram = 'instagram.com' in url
+        cookie_file_exists = os.path.exists(INSTAGRAM_COOKIE_PATH)
+
+        if is_instagram:
+            if cookie_file_exists:
+                logging.info(f"Instagram URL detected for download. Using cookies from: {INSTAGRAM_COOKIE_PATH}")
+                ydl_opts['cookiefile'] = INSTAGRAM_COOKIE_PATH
+            else:
+                # إذا فشلت المعاينة بدون كوكيز، فالتحميل سيفشل غالبًا
+                logging.error(f"Instagram URL detected for download but cookie file not found at {INSTAGRAM_COOKIE_PATH}. Download will likely fail.")
+                return jsonify({'error': 'فشل التحميل من انستغرام، قد يتطلب الأمر كوكيز صالحة على الخادم.'}), 403 # Forbidden or Bad Request
+        # -------------------------------------------------------
 
         if audio_only:
             logging.info("Setting options for audio download.")
             ydl_opts.update({
-                'format': 'bestaudio/best', # اطلب أفضل صوت
-                'extract_audio': True,      # استخراج الصوت
-                'audio_format': 'mp3',      # تحديد الصيغة النهائية للصوت
-                'audio_quality': 0,         # 0 = أفضل جودة (لـ MP3 VBR)
-                'keep_video': False,       # عدم الاحتفاظ بملف الفيديو المؤقت
-                'postprocessors': [{       # تحديد المعالج اللاحق لاستخراج الصوت
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                }]
+                'format': 'bestaudio/best', 'extract_audio': True, 'audio_format': 'mp3',
+                'audio_quality': 0, 'keep_video': False,
+                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]
             })
-            # اسم الملف النهائي سيكون له امتداد .mp3 بسبب المعالج اللاحق
             final_file_ext = 'mp3'
         else:
             logging.info(f"Setting options for video download, quality: {quality}")
-            # تحتاج إلى دمج الفيديو والصوت إذا لم يكن quality يمثلهما معاً
-            # quality قد يكون id لفيديو فقط، أو id لصيغة مدمجة
-            # Format selection needs care. Example: best video with given ID + best audio, merged into mp4
-            # Needs testing if `quality` refers to already merged formats (like from youtube)
-            # Assuming quality might be just video stream ID
+            # تبسيط تحديد الصيغة: نعتمد على quality + bestaudio ونترك yt-dlp يختار الأفضل
+            # إذا كانت quality تحتوي على صوت وفيديو، سيستخدمها. إذا فيديو فقط، سيضيف أفضل صوت.
             ydl_opts.update({
-                 'format': f"{quality}+bestaudio/bestvideo+bestaudio", # محاولة دمج أفضل فيديو + أفضل صوت
-                 'merge_output_format': 'mp4', # الصيغة النهائية المفضلة
+                 'format': f"{quality}+bestaudio/best", # اطلب الصيغة المحددة + أفضل صوت (أو أفضل إذا كان quality=best)
+                 'merge_output_format': 'mp4',
             })
             final_file_ext = 'mp4'
 
-        # --- بدء عملية التنزيل والمعالجة بواسطة yt-dlp ---
-        logging.info(f"Starting download/processing for {url} with options: {ydl_opts}")
+        logging.info(f"Starting download/processing for {url} with final options: {ydl_opts}")
         downloaded_file_path = None
         info = None
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             try:
-                # استخراج المعلومات الكاملة بما في ذلك مسار الملف بعد المعالجة
                 info = ydl.extract_info(url, download=True)
                 if not info:
                     raise youtube_dl.utils.DownloadError("extract_info returned empty.")
 
-                # الحصول على المسار النهائي للملف بعد معالجة yt-dlp (بما في ذلك تغيير الامتداد إلى mp3)
-                # yt-dlp لا يعيد المسار مباشرة بشكل موثوق بعد المعالجات اللاحقة
-                # سنحتاج لتخمين اسم الملف أو البحث عنه
-                # الطريقة الأبسط: البحث عن أحدث ملف بالامتداد المتوقع في مجلد الإخراج
-                list_of_files = [os.path.join(output_dir, f) for f in os.listdir(output_dir)]
-                if not list_of_files:
-                    raise FileNotFoundError("No files found in output directory after download.")
-
-                # العثور على الملف الذي تم إنشاؤه مؤخرًا بالامتداد الصحيح
-                latest_file = max(list_of_files, key=os.path.getctime)
-                if latest_file.lower().endswith(f'.{final_file_ext}'):
-                    downloaded_file_path = latest_file
-                    logging.info(f"Download successful. File path identified: {downloaded_file_path}")
+                # محاولة أكثر موثوقية للحصول على اسم الملف بعد المعالجة
+                # خاصة بعد تحويل الصيغة مثل استخراج mp3
+                filename_in_info = ydl.prepare_filename(info)
+                # التحقق من الامتداد المتوقع وإذا لم يتطابق، محاولة العثور عليه
+                if filename_in_info.lower().endswith(f'.{final_file_ext}') and os.path.exists(filename_in_info):
+                    downloaded_file_path = filename_in_info
                 else:
-                    # حالة نادرة: ربما استخدم yt-dlp امتدادًا مختلفًا
-                    logging.warning(f"Latest file {latest_file} doesn't have expected extension .{final_file_ext}. Trying to use it anyway.")
-                    downloaded_file_path = latest_file # Attempt to use it
+                    # إذا لم يتطابق الامتداد (مثل حالة mp3)، ابحث في المجلد
+                    logging.warning(f"Filename from info ({filename_in_info}) doesn't match expected extension .{final_file_ext} or doesn't exist. Searching directory.")
+                    list_of_files = [os.path.join(output_dir, f) for f in os.listdir(output_dir)]
+                    if not list_of_files:
+                        raise FileNotFoundError("No files found in output directory after download attempt.")
 
+                    # البحث عن أحدث ملف بالامتداد الصحيح
+                    possible_files = [f for f in list_of_files if f.lower().endswith(f'.{final_file_ext}')]
+                    if possible_files:
+                       latest_file = max(possible_files, key=os.path.getctime)
+                       downloaded_file_path = latest_file
+                    else:
+                        # إذا لم نجد بالامتداد الصحيح، نأخذ أحدث ملف تم إنشاؤه
+                        latest_file = max(list_of_files, key=os.path.getctime)
+                        logging.warning(f"Could not find file with extension .{final_file_ext}. Using latest file found: {latest_file}")
+                        downloaded_file_path = latest_file
 
                 if not downloaded_file_path or not os.path.exists(downloaded_file_path):
-                     raise FileNotFoundError(f"Could not determine or find the final downloaded file with extension .{final_file_ext}")
+                     raise FileNotFoundError(f"Could not determine or find the final downloaded file.")
 
+                logging.info(f"Download successful. File path identified: {downloaded_file_path}")
 
             except youtube_dl.utils.DownloadError as e:
                 logging.error(f"yt-dlp download/processing failed for {url}: {e}")
-                error_msg = 'فشل تنزيل أو معالجة الملف. قد يكون المحتوى محمياً أو غير متاح بهذه الجودة.'
-                return jsonify({'error': error_msg}), 500 # Internal Server Error or suitable code
+                error_msg = 'فشل تنزيل أو معالجة الملف. قد يكون المحتوى محمياً، غير متاح بهذه الجودة، يتطلب كوكيز صالحة، أو تم الوصول لحد الطلبات.'
+                return jsonify({'error': error_msg}), 500
             except FileNotFoundError as e:
                  logging.error(f"File handling error after download for {url}: {e}")
                  return jsonify({'error': 'خطأ في التعامل مع الملفات بعد التنزيل.'}), 500
@@ -329,36 +341,29 @@ def download():
                 logging.error(f"Unexpected error during yt-dlp processing for {url}: {e}", exc_info=True)
                 return jsonify({'error': 'حدث خطأ غير متوقع أثناء التنزيل.'}), 500
 
+        final_output_path = downloaded_file_path
 
-        # --- الآن لدينا الملف المحمّل (downloaded_file_path) ---
-        final_output_path = downloaded_file_path # المسار الافتراضي هو الملف المحمل
-
-        # --- التعامل مع القص (Trimming) إذا كان مطلوبًا ---
-        # يتم القص *بعد* التنزيل الكامل والمعالجة الأولية (مثل استخراج الصوت)
         if mode == 'trim' and info and (start_time != '0' or end_time):
             logging.info(f"Trimming requested: Start={start_time}s, End={end_time}s")
-            video_duration = info.get('duration') # مدة الفيديو الأصلي بالثواني
+            video_duration = info.get('duration')
 
-            # التحقق من صحة أوقات القص (بالثواني)
             try:
                 start_sec = float(start_time)
                 if video_duration is not None and start_sec >= video_duration:
                     logging.warning(f"Start time {start_sec}s >= duration {video_duration}s")
-                    os.remove(downloaded_file_path) # تنظيف الملف غير المقصوص
+                    os.remove(downloaded_file_path)
                     return jsonify({'error': 'وقت البداية يتجاوز مدة الملف!'}), 400
 
-                trim_opts = ['-ss', str(start_sec)] # وقت البداية
+                trim_opts = ['-ss', str(start_sec)]
                 if end_time and end_time.strip():
                     end_sec = float(end_time)
                     if video_duration is not None and end_sec > video_duration:
                         logging.warning(f"End time {end_sec}s > duration {video_duration}s. Trimming till end.")
-                        # لا نضيف -to, سيقص حتى النهاية
                     elif end_sec <= start_sec:
                         logging.warning(f"End time {end_sec}s <= start time {start_sec}s")
                         os.remove(downloaded_file_path)
                         return jsonify({'error': 'وقت النهاية يجب أن يكون أكبر من وقت البداية!'}), 400
                     else:
-                        # استخدام -to هو الأكثر دقة للقص
                         trim_opts.extend(['-to', str(end_sec)])
 
             except ValueError:
@@ -366,118 +371,95 @@ def download():
                  os.remove(downloaded_file_path)
                  return jsonify({'error': 'تنسيق وقت البداية أو النهاية غير صالح.'}), 400
 
-
-            # إنشاء اسم ملف جديد للملف المقصوص
-            base, ext = os.path.splitext(os.path.basename(downloaded_file_path))
-            # استخدام اسم آمن بناءً على العنوان الأصلي إن أمكن
             original_title = info.get('title', 'trimmed_file')
             safe_base_name = generate_safe_filename(original_title)
+            base, ext = os.path.splitext(os.path.basename(downloaded_file_path))
             trimmed_filename = f"{safe_base_name}_{secrets.token_hex(4)}_trimmed{ext}"
             trimmed_output_path = os.path.join(output_dir, trimmed_filename)
             logging.info(f"Output path for trimmed file: {trimmed_output_path}")
 
-
-            # أمر ffmpeg للقص (استخدام -c copy أسرع إذا لم نغير الصيغة)
-            # -avoid_negative_ts make_zero: لتجنب مشاكل timestamp السالبة
             ffmpeg_cmd = [
-                ffmpeg_path,
-                '-v', 'error', # تسجيل الأخطاء فقط
-                '-i', downloaded_file_path, # الملف الأصلي المدخل
-                *trim_opts,                 # خيارات وقت البداية/النهاية
-                '-c', 'copy',               # نسخ الترميز (سريع جداً)
-                '-avoid_negative_ts', 'make_zero', # معالجة timestamps
-                '-y',                       # الكتابة فوق الملف إذا كان موجودًا
-                trimmed_output_path         # اسم الملف الناتج
+                ffmpeg_path, '-v', 'error', '-i', downloaded_file_path,
+                *trim_opts, '-c', 'copy', '-avoid_negative_ts', 'make_zero',
+                '-y', trimmed_output_path
             ]
 
             logging.info(f"Running FFmpeg trim command: {' '.join(ffmpeg_cmd)}")
             try:
-                # تشغيل أمر القص والتحقق من عدم وجود أخطاء
-                subprocess.run(ffmpeg_cmd, check=True, capture_output=True) # Capture output to check errors
+                result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True) # Capture output
                 logging.info("FFmpeg trimming completed successfully.")
+                if result.stderr: # Log any stderr output even on success
+                    logging.warning(f"FFmpeg stderr (trim success): {result.stderr}")
 
-                # حذف الملف الأصلي غير المقصوص
+
                 try:
                     os.remove(downloaded_file_path)
                     logging.info(f"Removed original untrimmed file: {downloaded_file_path}")
                 except OSError as e:
                     logging.warning(f"Could not remove original file {downloaded_file_path}: {e}")
 
-                final_output_path = trimmed_output_path # المسار النهائي هو الملف المقصوص
+                final_output_path = trimmed_output_path
 
             except subprocess.CalledProcessError as e:
-                logging.error(f"FFmpeg trimming failed! Command: {' '.join(e.cmd)}. Error: {e.stderr.decode()}")
-                # محاولة حذف الملفات المؤقتة
+                logging.error(f"FFmpeg trimming failed! Command: {' '.join(e.cmd)}. Stderr: {e.stderr}")
                 if os.path.exists(downloaded_file_path): os.remove(downloaded_file_path)
                 if os.path.exists(trimmed_output_path): os.remove(trimmed_output_path)
-                return jsonify({'error': 'فشل قص الملف. تحقق من أوقات البداية والنهاية أو قد تكون الصيغة غير مدعومة للقص السريع.'}), 500
+                return jsonify({'error': 'فشل قص الملف. تحقق من الأوقات أو قد تكون الصيغة غير مدعومة للقص السريع.'}), 500
             except Exception as e:
                  logging.error(f"Unexpected error during trimming: {e}", exc_info=True)
                  if os.path.exists(downloaded_file_path): os.remove(downloaded_file_path)
                  if os.path.exists(trimmed_output_path): os.remove(trimmed_output_path)
                  return jsonify({'error': 'حدث خطأ غير متوقع أثناء قص الملف.'}), 500
 
-
-        # --- الخطوة النهائية: إرجاع اسم الملف للواجهة الأمامية ---
         final_filename = os.path.basename(final_output_path)
-        logging.info(f"Download/Trim successful. Returning filename: {final_filename}")
+        logging.info(f"Operation successful. Returning filename: {final_filename}")
         return jsonify({'success': True, 'filename': final_filename})
 
     except Exception as e:
-        # Catch-all ل أي خطأ غير متوقع في العملية بأكملها
         logging.error(f"Major error in /download endpoint for {url}: {e}", exc_info=True)
         return jsonify({'error': 'حدث خطأ عام أثناء عملية التنزيل. يرجى المحاولة مرة أخرى.'}), 500
 
 
-# --- تعديل دالة تحميل الملف ---
 @app.route('/downloads/<path:filename>')
 def download_file(filename):
     logging.info(f"Received request to download file: {filename}")
-
-    # تحديد المجلدات المحتملة
     possible_folders = [AUDIO_FOLDER, VIDEO_FOLDER]
     found_path = None
+    directory_to_serve_from = None
 
-    # البحث عن الملف في المجلدين
     for folder in possible_folders:
         file_path = os.path.join(folder, filename)
         if os.path.exists(file_path):
-            # التحقق الأمني (مهم جداً) - هل المسار الفعلي يبدأ بمسار المجلد المسموح به؟
             abs_folder_path = os.path.abspath(folder)
             abs_file_path = os.path.abspath(file_path)
             if abs_file_path.startswith(abs_folder_path):
                 found_path = file_path
                 directory_to_serve_from = folder
                 logging.info(f"File found in: {directory_to_serve_from}")
-                break # توقف عند العثور على الملف
+                break
             else:
-                 # تسجيل محاولة وصول غير مصرح بها
-                 logging.error(f"Security Alert: Attempt to access file outside allowed directory! Requested: {filename}, Resolved Path: {abs_file_path}, Allowed Folder: {abs_folder_path}")
-                 return jsonify({'error': 'Access denied.'}), 403 # Forbidden
+                 logging.error(f"Security Alert: Attempt to access file outside allowed directory! Req: {filename}, Path: {abs_file_path}, Allowed: {abs_folder_path}")
+                 return jsonify({'error': 'Access denied.'}), 403
 
     if not found_path:
         logging.error(f"File not found in any specified directory: {filename}")
-        return jsonify({'error': 'الملف المطلوب غير موجود أو تم حذفه.'}), 404 # Not Found
+        return jsonify({'error': 'الملف المطلوب غير موجود أو تم حذفه.'}), 404
 
     try:
         logging.info(f"Sending file: {filename} from directory: {directory_to_serve_from}")
-        # إرسال الملف للمستخدم كتنزيل (as_attachment=True)
         return send_from_directory(directory_to_serve_from, filename, as_attachment=True)
     except Exception as e:
         logging.error(f"Error sending file {filename}: {e}", exc_info=True)
         return jsonify({'error': 'حدث خطأ أثناء إرسال الملف.'}), 500
 
-# --- نهاية تعديل دالة تحميل الملف ---
-
 
 @app.errorhandler(500)
 def internal_server_error(e):
-    logging.error(f"Internal Server Error triggered: {e}", exc_info=True) # Log full traceback for 500 errors
+    logging.error(f"Internal Server Error triggered: {e}", exc_info=True)
     return jsonify({'error': 'حدث خطأ داخلي في الخادم. يرجى المحاولة مرة أخرى لاحقًا.'}), 500
 
 if __name__ == '__main__':
-    # اجعل التطبيق يستمع على كل الواجهات وعلى البورت المعطى من Render (أو 5000 افتراضي)
-    # يجب أن يكون debug=False في الإنتاج
     port = int(os.environ.get('PORT', 5000))
     logging.info(f"Starting Flask server on host 0.0.0.0, port {port}, debug=False")
+    # تأكد من استخدام gunicorn في الإنتاج (عبر Dockerfile CMD), هذا للتشغيل المحلي فقط
     app.run(debug=False, host='0.0.0.0', port=port)
