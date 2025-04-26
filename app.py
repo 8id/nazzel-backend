@@ -122,7 +122,8 @@ def image_proxy():
 def preview():
     url = request.form.get('url')
     mode = request.form.get('mode', 'video')
-    logging.info(f"Received /preview request for URL: {url}, Mode: {mode}")
+    logging.info(f"Raw Preview Request Data - URL: {request.form.get('url')}, Mode: {request.form.get('mode')}")
+    logging.info(f"Parsed Preview Request - URL: {url}, Mode: {mode}")
 
     if not url:
          logging.warning("Preview request received without URL.")
