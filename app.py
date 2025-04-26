@@ -58,7 +58,7 @@ def image_proxy():
     if not image_url: return jsonify({'error': 'Missing image URL parameter'}), 400
     try:
         parsed_url = urlparse(image_url)
-        allowed_domains = ['cdninstagram.com', 'fbcdn.net', 'googleusercontent.com', 'ggpht.com']
+        allowed_domains = ['cdninstagram.com', 'fbcdn.net', 'googleusercontent.com', 'ggpht.com','tiktokcdn.com', 'tiktokcdn-us.com', 'ibyteimg.com', 'tiktok.com' ]
         hostname = parsed_url.hostname
         if not hostname or not any(hostname.endswith(domain) for domain in allowed_domains):
             logging.warning(f"Image proxy request blocked for disallowed domain: {hostname} from URL {image_url}")
