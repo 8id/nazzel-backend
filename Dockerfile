@@ -25,4 +25,4 @@ COPY . .
 # تحديد الأمر الذي سيتم تشغيله عند بدء الحاوية
 # Render يستخدم متغير البيئة $PORT لتحديد المنفذ الذي يجب أن يستمع عليه التطبيق
 # Gunicorn يشغل تطبيق Flask المسمى 'app' داخل ملف 'app.py'
-CMD sh -c 'gunicorn --bind "0.0.0.0:$PORT" app:app'
+CMD cp /etc/secrets/instagram_cookies.txt /tmp/instagram_cookies.txt && gunicorn --bind "0.0.0.0:$PORT" app:app || gunicorn --bind "0.0.0.0:$PORT" app:app

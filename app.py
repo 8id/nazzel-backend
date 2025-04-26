@@ -22,9 +22,10 @@ AUDIO_FOLDER = os.path.join(UPLOAD_FOLDER, 'audio')
 ALLOWED_PLATFORMS = ['youtube.com', 'youtu.be', 'instagram.com', 'tiktok.com', 'facebook.com']
 SECRET_KEY = secrets.token_hex(16)
 app.config['SECRET_KEY'] = SECRET_KEY
-# --- مسار ملف الكوكيز لـ Instagram ---
-INSTAGRAM_COOKIE_PATH = "/etc/secrets/instagram_cookies.txt"
-# ------------------------------------
+
+# --- تعديل: استخدام المسار المؤقت القابل للكتابة ---
+INSTAGRAM_COOKIE_PATH = "/tmp/instagram_cookies.txt"
+# -----------------------------------------------
 
 # Create directories if they don't exist
 os.makedirs(VIDEO_FOLDER, exist_ok=True)
@@ -78,26 +79,29 @@ def preview():
         }
 
         is_instagram = 'instagram.com' in url
-        cookie_file_exists = os.path.exists(INSTAGRAM_COOKIE_PATH)
+        # التحقق من وجود الملف المنسوخ في /tmp
+        cookie_file_exists = os.path.exists(INSTAGRAM_COOKIE_PATH) # Path is now /tmp/...
 
         if is_instagram:
             if cookie_file_exists:
                 logging.info(f"Instagram URL (initial info). Using cookies from: {INSTAGRAM_COOKIE_PATH}")
-                # --- التعديل: استخدام cookiesfrombrowser بدلاً من cookiefile ---
-                ydl_opts['cookiesfrombrowser'] = ('firefox', INSTAGRAM_COOKIE_PATH)
-                # --------------------------------------------------------
+                # --- العودة إلى استخدام cookiefile ---
+                ydl_opts['cookiefile'] = INSTAGRAM_COOKIE_PATH
+                # ------------------------------------
             else:
                 logging.warning(f"Instagram URL (initial info) but cookie file not found at {INSTAGRAM_COOKIE_PATH}.")
 
         logging.info(f"Extracting initial info for {url} with options: {ydl_opts}")
         info = None
         try:
+            # زيادة المهلة هنا أيضاً قد تساعد
+            ydl_opts['socket_timeout'] = 20
             with youtube_dl.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if not info: raise youtube_dl.utils.DownloadError("Failed to extract information, info is empty.")
         except youtube_dl.utils.DownloadError as e:
-            # ... (معالجة الأخطاء كما كانت) ...
             logging.error(f"yt-dlp info extraction failed for {url}: {e}")
+            # ... (معالجة الأخطاء كما كانت) ...
             error_msg = 'فشل استخراج معلومات الفيديو. قد يكون الفيديو غير متاح، خاص، يتطلب تسجيل الدخول أو تم الوصول لحد الطلبات.'
             if 'private' in str(e).lower(): error_msg = 'الفيديو خاص ولا يمكن الوصول إليه.'
             elif 'unavailable' in str(e).lower(): error_msg = 'الفيديو غير متوفر.'
@@ -118,16 +122,18 @@ def preview():
         }
         if is_instagram:
             if cookie_file_exists:
-                logging.info(f"Using Instagram cookies for format extraction.")
-                # --- التعديل: استخدام cookiesfrombrowser بدلاً من cookiefile ---
-                ydl_opts_formats['cookiesfrombrowser'] = ('firefox', INSTAGRAM_COOKIE_PATH)
-                # --------------------------------------------------------
+                logging.info(f"Using Instagram cookies for format extraction from: {INSTAGRAM_COOKIE_PATH}")
+                 # --- العودة إلى استخدام cookiefile ---
+                ydl_opts_formats['cookiefile'] = INSTAGRAM_COOKIE_PATH
+                 # ------------------------------------
             else:
-                logging.warning(f"Cookie file not found for Instagram format extraction.")
+                logging.warning(f"Cookie file not found at {INSTAGRAM_COOKIE_PATH} for Instagram format extraction.")
 
         logging.info(f"Extracting formats for {url}...")
         formats = []
         try:
+             # زيادة المهلة هنا أيضاً
+             ydl_opts_formats['socket_timeout'] = 20
              with youtube_dl.YoutubeDL(ydl_opts_formats) as ydl_formats:
                   info_with_formats = ydl_formats.extract_info(url, download=False)
                   if info_with_formats: formats = info_with_formats.get('formats', [])
@@ -143,10 +149,7 @@ def preview():
 
         if mode == 'audio':
              logging.info(f"Preview mode 'audio' for {url}. Sending audio-only option.")
-             return jsonify({
-                'title': title, 'duration': duration or 0, 'thumbnail': thumbnail or '',
-                'qualities': [('bestaudio/best', 'صوت فقط')], 'mode': mode
-             })
+             return jsonify({'title': title, 'duration': duration or 0, 'thumbnail': thumbnail or '', 'qualities': [('bestaudio/best', 'صوت فقط')], 'mode': mode})
 
         # ... (باقي كود فلترة الجودات وإرجاع النتيجة كما كان) ...
         unique_qualities = {}
@@ -159,13 +162,9 @@ def preview():
                      current_best_tbr = unique_qualities.get(height, {}).get('tbr', -1)
                      current_is_preferred = unique_qualities.get(height, {}).get('preferred', False)
                      new_tbr = f.get('tbr') or f.get('vbr') or f.get('abr') or 0
-                     if height not in unique_qualities or \
-                        (is_preferred and not current_is_preferred) or \
-                        (is_preferred == current_is_preferred and new_tbr > current_best_tbr):
+                     if height not in unique_qualities or (is_preferred and not current_is_preferred) or (is_preferred == current_is_preferred and new_tbr > current_best_tbr):
                            unique_qualities[height] = {'id': format_id, 'label': str(height), 'tbr': new_tbr, 'preferred': is_preferred}
-        else:
-             logging.warning(f"No formats found for {url}. Cannot provide quality options.")
-
+        else: logging.warning(f"No formats found for {url}. Cannot provide quality options.")
         qualities_tuples = sorted([(q['id'], q['label']) for q in unique_qualities.values()], key=lambda item: int(item[1]), reverse=True)
         logging.info(f"Preview mode 'video' for {url}. Found qualities: {qualities_tuples}")
         return jsonify({'title': title, 'duration': duration or 0, 'thumbnail': thumbnail or '', 'qualities': qualities_tuples, 'mode': mode })
@@ -209,30 +208,33 @@ def download():
             'quiet': True, 'no_warnings': True, 'encoding': 'utf-8',
             'noplaylist': True, 'noprogress': True,
             'postprocessor_args': {'ffmpeg': ['-v', 'error']},
-            'format': None, 'socket_timeout': 30, 'retries': 3,
+            'format': None, 'socket_timeout': 60, 'retries': 3, # زيادة المهلة أكثر للتحميل
         }
 
-        # --- التعديل: استخدام cookiesfrombrowser لـ Instagram في التحميل ---
+        # --- العودة إلى استخدام cookiefile مع المسار الجديد ---
         is_instagram = 'instagram.com' in url
+        # التحقق من وجود الملف المنسوخ في /tmp
         cookie_file_exists = os.path.exists(INSTAGRAM_COOKIE_PATH)
 
         if is_instagram:
             if cookie_file_exists:
                 logging.info(f"Instagram URL detected for download. Using cookies from: {INSTAGRAM_COOKIE_PATH}")
-                ydl_opts['cookiesfrombrowser'] = ('firefox', INSTAGRAM_COOKIE_PATH) # <-- التغيير هنا
+                ydl_opts['cookiefile'] = INSTAGRAM_COOKIE_PATH # <-- التغيير هنا
             else:
                 logging.error(f"Instagram URL detected for download but cookie file not found at {INSTAGRAM_COOKIE_PATH}.")
                 return jsonify({'error': 'فشل التحميل من انستغرام، قد يتطلب الأمر كوكيز صالحة على الخادم.'}), 403
-        # -----------------------------------------------------------
+        # --------------------------------------------------
 
         if audio_only:
+            # ... (خيارات الصوت كما كانت) ...
             logging.info("Setting options for audio download.")
             ydl_opts.update({'format': 'bestaudio/best', 'extract_audio': True, 'audio_format': 'mp3','audio_quality': 0, 'keep_video': False, 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}]})
             final_file_ext = 'mp3'
         else:
-            logging.info(f"Setting options for video download, quality: {quality}")
-            ydl_opts.update({'format': f"{quality}+bestaudio/best", 'merge_output_format': 'mp4'})
-            final_file_ext = 'mp4'
+            # ... (خيارات الفيديو كما كانت) ...
+             logging.info(f"Setting options for video download, quality: {quality}")
+             ydl_opts.update({'format': f"{quality}+bestaudio/best", 'merge_output_format': 'mp4'})
+             final_file_ext = 'mp4'
 
         logging.info(f"Starting download/processing for {url} with final options: {ydl_opts}")
         downloaded_file_path = None
@@ -241,10 +243,9 @@ def download():
             try:
                 info = ydl.extract_info(url, download=True)
                 if not info: raise youtube_dl.utils.DownloadError("extract_info returned empty.")
-                # ... (باقي منطق العثور على الملف المحمل كما كان) ...
+                # ... (منطق العثور على الملف المحمل كما كان) ...
                 filename_in_info = ydl.prepare_filename(info)
-                if filename_in_info.lower().endswith(f'.{final_file_ext}') and os.path.exists(filename_in_info):
-                    downloaded_file_path = filename_in_info
+                if filename_in_info.lower().endswith(f'.{final_file_ext}') and os.path.exists(filename_in_info): downloaded_file_path = filename_in_info
                 else:
                     logging.warning(f"Filename from info ({filename_in_info}) doesn't match expected extension .{final_file_ext} or doesn't exist. Searching directory.")
                     list_of_files = [os.path.join(output_dir, f) for f in os.listdir(output_dir)]
@@ -254,7 +255,6 @@ def download():
                     else: latest_file = max(list_of_files, key=os.path.getctime); logging.warning(f"Could not find file with extension .{final_file_ext}. Using latest file found: {latest_file}"); downloaded_file_path = latest_file
                 if not downloaded_file_path or not os.path.exists(downloaded_file_path): raise FileNotFoundError(f"Could not determine or find the final downloaded file.")
                 logging.info(f"Download successful. File path identified: {downloaded_file_path}")
-
             except youtube_dl.utils.DownloadError as e:
                  # ... (معالجة الأخطاء كما كانت) ...
                  logging.error(f"yt-dlp download/processing failed for {url}: {e}")
@@ -276,9 +276,7 @@ def download():
             try:
                 start_sec = float(start_time)
                 if video_duration is not None and start_sec >= video_duration:
-                    logging.warning(f"Start time {start_sec}s >= duration {video_duration}s")
-                    os.remove(downloaded_file_path)
-                    return jsonify({'error': 'وقت البداية يتجاوز مدة الملف!'}), 400
+                    logging.warning(f"Start time {start_sec}s >= duration {video_duration}s"); os.remove(downloaded_file_path); return jsonify({'error': 'وقت البداية يتجاوز مدة الملف!'}), 400
                 trim_opts = ['-ss', str(start_sec)]
                 if end_time and end_time.strip():
                     end_sec = float(end_time)
@@ -322,7 +320,6 @@ def download():
         logging.error(f"Major error in /download endpoint for {url}: {e}", exc_info=True)
         return jsonify({'error': 'حدث خطأ عام أثناء عملية التنزيل. يرجى المحاولة مرة أخرى.'}), 500
 
-
 # ... (باقي الكود download_file, internal_server_error, if __name__ == '__main__' يبقى كما هو) ...
 
 @app.route('/downloads/<path:filename>')
@@ -356,7 +353,6 @@ def download_file(filename):
     except Exception as e:
         logging.error(f"Error sending file {filename}: {e}", exc_info=True)
         return jsonify({'error': 'حدث خطأ أثناء إرسال الملف.'}), 500
-
 
 @app.errorhandler(500)
 def internal_server_error(e):
